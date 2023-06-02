@@ -6,7 +6,7 @@ from data.dataset import EyeTrackingInivationDataset
 from data.transform import FromPupilCenterToBoundingBox, AedatEventsToXYTP
 from torch.utils.data import DataLoader
 from tonic import MemoryCachedDataset
-from tonic.transforms import Compose, ToFrame
+from tonic.transforms import Compose, ToFrame, CenterCropEventsToSpeckResolution
 
 from nets import get_summary
 from nets.model import SynSenseEyeTracking
@@ -53,18 +53,19 @@ def launch_fire(
     input_transforms = Compose(
         [
             AedatEventsToXYTP(),
-            ...,
+            CenterCropEventsToSpeckResolution(),
             ToFrame(
                 sensor_size=[128, 128, 1],
                 n_event_bins=100
             )
         ]
     )
+    target_transforms = FromPupilCenterToBoundingBox()
 
     # Dataset
     train_dataset = EyeTrackingInivationDataset(data_dir, 
                                                 transform=input_transforms,
-                                                target_transform=FromPupilCenterToBoundingBox,
+                                                target_transform=target_transforms,
                                                 save_to="./data", 
                                                 list_experiments=[0]) 
     augmented_dataset = MemoryCachedDataset(train_dataset)
