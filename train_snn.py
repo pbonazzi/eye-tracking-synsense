@@ -1,7 +1,7 @@
 import torch, pdb, fire, wandb, os, math
 from tqdm import tqdm
 
-
+import tonic
 from data.dataset import EyeTrackingInivationDataset
 from data.transform import FromPupilCenterToBoundingBox, AedatEventsToXYTP
 from torch.utils.data import DataLoader
@@ -14,7 +14,7 @@ from nets.loss import YoloLoss
 
 from sinabs.exodus import conversion
 from sinabs.from_torch import from_model
-#from sinabs.exodus.layers import IAFSqueeze
+from sinabs.exodus.layers import IAFSqueeze
 
 def launch_fire(
     project_name = "synsense_snn", 
@@ -69,6 +69,7 @@ def launch_fire(
                                                 list_experiments=[0]) 
     augmented_dataset = MemoryCachedDataset(train_dataset)
     train_dataloader = DataLoader(augmented_dataset, 
+                                  collate_fn=tonic.collation.PadTensors(batch_first=True),
                                   batch_size=batch_size, 
                                   shuffle=True)
     
@@ -80,7 +81,7 @@ def launch_fire(
     
     exodus_model = conversion.sinabs_to_exodus(sinabs_model)
 
-    pdb.set_trace()
+    #pdb.set_trace()
 
     # Define optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -92,7 +93,7 @@ def launch_fire(
     # backprop over epochs
     for epoch in pbar:
         # over batches
-        model.train()
+        model = model.train()
         for (data, labels) in enumerate(train_dataloader):
             # reset grad to zero for each batch
             optimizer.zero_grad()
@@ -101,7 +102,7 @@ def launch_fire(
             data, labels = data.to(device), labels.to(device)
 
             # forward pass
-            outputs = model(data)
+            outputs = exodus_model.spiking_model(data)
             
             # calculate loss
             loss_dict, log_data = criterion(outputs, labels)
