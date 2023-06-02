@@ -39,12 +39,13 @@ class FromPupilCenterToBoundingBox:
         num_boxes: int=2,
         convert_to_speck: bool=True
     ):
+        self.convert_to_speck = convert_to_speck
         self.image_size = image_size
         self.delta = 10
         self.S, self.C, self.B = SxS_Grid, num_classes, num_boxes
     
     def __call__(self, target):
-        if convert_to_speck:
+        if self.convert_to_speck:
             x, y = target
             x = (x - 64) // 4
             y = (y + 16) // 4
