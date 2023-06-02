@@ -6,6 +6,7 @@ from data.dataset import EyeTrackingInivationDataset
 from data.transform import FromPupilCenterToBoundingBox, AedatEventsToXYTP
 from torch.utils.data import DataLoader
 from tonic import MemoryCachedDataset
+from tonic.transforms import Compose, ToFrame
 
 from nets import get_summary
 from nets.model import SynSenseEyeTracking
@@ -47,10 +48,22 @@ def launch_fire(
     device = torch.device("cuda")
     model = SynSenseEyeTracking()
     get_summary(model)
+    
+    # Transforms
+    input_transforms = Compose(
+        [
+            AedatEventsToXYTP(),
+            ...,
+            ToFrame(
+                sensor_size=[128, 128, 1],
+                n_event_bins=100
+            )
+        ]
+    )
 
     # Dataset
     train_dataset = EyeTrackingInivationDataset(data_dir, 
-                                                transform=AedatEventsToXYTP,
+                                                transform=input_transforms,
                                                 target_transform=FromPupilCenterToBoundingBox,
                                                 save_to="./data", 
                                                 list_experiments=[0]) 
