@@ -4,6 +4,7 @@ Implementation of Yolo Loss Function from the original yolo paper
 import pdb
 import torch
 import torch.nn as nn
+import numpy as np
 from nets.model import arguments
 
 def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint"):
@@ -52,6 +53,23 @@ def intersection_over_union(boxes_preds, boxes_labels, box_format="midpoint"):
     return intersection / (box1_area + box2_area - intersection + 1e-6)
 
 
+class GaussianLoss(nn.Module):
+    def __init__(self, threshold):
+        super(GaussianLoss, self).__init__()
+        self.threshold = threshold # Mean of the Gaussian distribution
+
+    def forward(self, y_pred):
+        mu = self.threshold 
+        sigma = 1.0  
+
+        # Compute the probability density function (PDF) of the Gaussian distribution
+        pdf = torch.exp(-0.5 * ((y_pred - mu) / sigma)**2) / (sigma * torch.sqrt(2 * torch.tensor(np.pi)))
+
+        # Compute the loss as the distance from the Gaussian PDF
+        loss = 1.0 - pdf
+
+        return loss
+    
 
 class YoloLoss(nn.Module):
     """

@@ -18,7 +18,7 @@ class CenterCropEventsToSpeckResolution:
     def __init__(self):
         pass
     
-    def __call__(self, data: np.record):
+    def __call__(self, evs: np.record):
         # x from 0-640 to 0-512 center cropped
         evs = evs[evs['x'] > 64]
         evs = evs[evs['x'] < 576]

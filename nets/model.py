@@ -56,8 +56,9 @@ class SynSenseEyeTracking(nn.Module):
             
             # Dense Layer 9
             nn.Linear(128, self.S * self.S *(self.C + self.B * 5)),
-            #nn.ReLU(),
+            nn.ReLU(),
         )
 
     def forward(self, x):
-        return self.seq(x)
+        pdb.set_trace()
+        return x

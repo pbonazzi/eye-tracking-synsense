@@ -191,10 +191,10 @@ class EyeTrackingInivationDataset():
 
 
         if self.transform:
-            data = self.transform()(data)
+            data = self.transform(data)
         
         if self.target_transform:
-            label = self.target_transform()(label)
+            label = self.target_transform(label)
 
-        return data, label
+        return data, label, 
 
