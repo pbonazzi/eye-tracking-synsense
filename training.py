@@ -1,4 +1,5 @@
-import torch, pdb, fire, wandb, os, math, cv2
+import torch, pdb, fire, wandb, os, math, cv2, time
+import numpy as np
 from tqdm import tqdm
 
 import tonic
@@ -12,8 +13,9 @@ from tonic.transforms import Compose, ToFrame
 
 from nets import get_summary
 from nets.model import SynSenseEyeTracking
-from nets.loss import YoloLoss, GaussianLoss
+from nets.loss import YoloLoss, GaussianLoss, arguments
 from nets.lpf import LPFOnline
+from util import draw_image
 
 from sinabs.exodus import conversion
 from sinabs.from_torch import from_model
@@ -76,6 +78,28 @@ def launch_fire(
                                                 save_to="./data", 
                                                 list_experiments=list(range(0, 26))) 
     
+    test_dataset = EyeTrackingInivationDataset(data_dir, 
+                                                transform=input_transforms,
+                                                target_transform=target_transforms,
+                                                save_to="./data", 
+                                                list_experiments=list(range(26, 28))) 
+    
+    train_cache_dataset = DiskCachedDataset(
+                        train_dataset, 
+                        cache_path="/home/thor/projects/pietro/.cache/eye-tracking-tonic-dataset"
+    )
+    test_cache_dataset = DiskCachedDataset(
+                        test_dataset, 
+                        cache_path="/home/thor/projects/pietro/.cache/eye-tracking-tonic-dataset-test"
+    )
+    train_dataloader = DataLoader(train_cache_dataset, 
+                                  batch_size=batch_size, 
+                                  shuffle=True)
+
+    test_dataloader = DataLoader(test_cache_dataset, 
+                                  batch_size=batch_size, 
+                                  shuffle=True)
+
     # pdb.set_trace()
 
     # train_dataset = SlicedDataset(
@@ -87,14 +111,6 @@ def launch_fire(
 
     # pdb.set_trace()
 
-    cache_dataset = DiskCachedDataset(
-                        train_dataset, 
-                        cache_path="./cache/eye-tracking-tonic-dataset"
-    )
-
-    train_dataloader = DataLoader(cache_dataset, 
-                                  batch_size=batch_size, 
-                                  shuffle=True)
     
     # Model 
     sinabs_model = from_model(model.seq, 
@@ -110,7 +126,8 @@ def launch_fire(
 
     # Define optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    general_criterion = YoloLoss()
+    args = arguments()
+    general_criterion = YoloLoss(args)
     spiking_criterion = GaussianLoss(threshold=1) # firing rate
     min_accuracy = float("inf")
 
@@ -121,7 +138,7 @@ def launch_fire(
     for epoch in pbar:
         # over batches
         model = model.train()
-        for i, (data, labels) in enumerate(train_dataloader):
+        for i, (data, labels) in enumerate(tqdm(train_dataloader)):
             # reset grad to zero for each batch
             optimizer.zero_grad()
 
@@ -192,7 +209,75 @@ def launch_fire(
                 accuracy = min_accuracy
                 torch.save(model.state_dict(), os.path.join(out_dir, "best.pt"))
 
-            
+        if epoch % 10 == 0:
+
+            # With no gradient means less memory and calculation on forward pass
+            with torch.no_grad():
+
+                # evaluation usese Dropout and BatchNorm in inference mode
+                model.eval()
+
+                # Get the size of the first image
+                width, height = 640, 480
+
+                # Define the codec and create a VideoWriter object
+                output_path = f"{epoch}.mp4"
+                fps=5
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                video_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+                # over batches
+                exec_time, accuracy = 0, 0
+                for num, (imgs, labels) in enumerate(test_dataloader):
+
+                    start = time.time()
+                    # port to device
+                    data, labels = data.float().to(device), labels.float().to(device)
+
+                    # forward pass
+                    b, t, c, h, w = data.shape
+                    data = data.reshape(b*t, c, h, w)
+                    outputs = model(data)
+
+                    # low pass filter
+                    outputs = outputs.reshape(b, outputs.shape[0]// b, outputs.shape[-1])
+                    outputs = outputs.permute(0, 2, 1)
+                    outputs = lpf(outputs)
+                    outputs = outputs[..., outputs.shape[-1]//2]
+                    end = time.time() 
+                    exec_time += ((end-start)*1000)    
+
+                    # calculate loss
+                    loss_dict, log_data = general_criterion(outputs, labels)
+
+                    # epoch images
+                    target_box = labels[..., 2:6][0].detach()
+                    pred_box = log_data["box_pred"][0].detach()
+                    
+                    # accuracy
+                    point_target = (target_box[..., :2] + (target_box[..., 2:] - target_box[..., :2])/2).sum(0).sum(0) 
+                    point_pred = (pred_box[..., :2] + (pred_box[..., 2:] - pred_box[..., :2])/2).sum(0).sum(0) 
+                    accuracy += math.sqrt(((point_pred[0]-point_target[0])*args.dsize[0])**2 + ((point_pred[1]-point_target[1])*args.dsize[1])**2)
+                    
+                    log_img = draw_image(imgs[0], pred_box, target_box, point_pred, point_target)
+                    log_img.rotate(90)
+                    #wandb.log({"val/images": wandb.Image(log_img.rotate(90))})
+                    cv_image = cv2.cvtColor(np.array(log_img), cv2.COLOR_RGB2BGR)
+                    video_writer.write(cv_image) 
+
+
+                video_writer.release()
+                print("Video Released")
+
+
+                # epoch loggings
+                for key in loss_dict.keys():
+                    wandb.log({f"val/{key}": loss_dict[key].detach()/batch_size})
+
+                wandb.log({f"val/accuracy": round(accuracy/len(test_dataloader), 2)})
+                print(f"Accuracy {round(accuracy/len(test_dataloader), 2)} (px)")
+                print(f"Latency {round(exec_time/len(test_dataloader), 2)} (ms)")
+           
     return model
 
 
